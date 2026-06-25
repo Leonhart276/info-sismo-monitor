@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
-"""Hourly earthquake/news monitor for Venezuela -> Discord + optional email.
+"""Hourly earthquake/news monitor for Venezuela -> Discord + email.
 
-Designed for GitHub Actions. It reads public sources, builds a digest,
-sends a compact version to Discord and the full version by email when SMTP
-secrets are configured, then updates state/state.json.
+Designed for GitHub Actions. It reads public sources, builds alerts when new
+items appear, sends a compact version to Discord and the full version by email,
+adds a WhatsApp-ready forwarding block, and can send one daily status summary.
 """
 
 from __future__ import annotations
@@ -46,6 +46,21 @@ EMAIL_STRICT = os.getenv("EMAIL_STRICT", "false").lower() == "true"
 DISCORD_MESSAGE_MODE = os.getenv("DISCORD_MESSAGE_MODE", "compact").lower()
 DISCORD_MAX_CHARS = int(os.getenv("DISCORD_MAX_CHARS", "1800"))
 
+# Optional URL shortening for short Discord/WhatsApp-friendly messages.
+SHORTEN_URLS_FOR_DISCORD = os.getenv("SHORTEN_URLS_FOR_DISCORD", "true").lower() == "true"
+SHORTEN_URLS_FOR_FORWARD = os.getenv("SHORTEN_URLS_FOR_FORWARD", "true").lower() == "true"
+URL_SHORTENER = os.getenv("URL_SHORTENER", "isgd").strip().lower()
+URL_SHORTENER_TIMEOUT = int(os.getenv("URL_SHORTENER_TIMEOUT", "8"))
+URL_CACHE_MAX_ENTRIES = int(os.getenv("URL_CACHE_MAX_ENTRIES", "500"))
+
+# Daily status summary controls.
+DAILY_SUMMARY_ENABLED = os.getenv("DAILY_SUMMARY_ENABLED", "true").lower() == "true"
+DAILY_SUMMARY_HOUR = int(os.getenv("DAILY_SUMMARY_HOUR", "9"))
+DAILY_SUMMARY_TO_DISCORD = os.getenv("DAILY_SUMMARY_TO_DISCORD", "true").lower() == "true"
+DAILY_SUMMARY_TO_EMAIL = os.getenv("DAILY_SUMMARY_TO_EMAIL", "true").lower() == "true"
+FORCE_DAILY_SUMMARY = os.getenv("FORCE_DAILY_SUMMARY", "false").lower() == "true"
+FORWARD_BLOCK_ENABLED = os.getenv("FORWARD_BLOCK_ENABLED", "true").lower() == "true"
+
 # Broad bounding box around Venezuela and nearby offshore areas.
 MIN_LAT = float(os.getenv("MIN_LAT", "0.0"))
 MAX_LAT = float(os.getenv("MAX_LAT", "13.8"))
@@ -54,7 +69,7 @@ MAX_LON = float(os.getenv("MAX_LON", "-58.8"))
 
 USER_AGENT = os.getenv(
     "HTTP_USER_AGENT",
-    "sismo-venezuela-discord-email-monitor/1.0 (+https://github.com/)",
+    "sismo-venezuela-discord-email-monitor/1.2 (+https://github.com/)",
 )
 
 EMOJI_ALERT = "\U0001F6A8"
@@ -65,6 +80,10 @@ EMOJI_GLOBE = "\U0001F30E"
 EMOJI_NEWS = "\U0001F4F0"
 EMOJI_MAIL = "\U0001F4E7"
 EMOJI_WARN = "\u26A0\uFE0F"
+EMOJI_PIN = "\U0001F4CC"
+EMOJI_PHONE = "\U0001F4F2"
+EMOJI_LINK = "\U0001F517"
+EMOJI_CHECK = "\u2705"
 
 RELEVANCE_RE = re.compile(
     r"\b(venezuela|venezolano|venezolana|caracas|la guaira|yaracuy|falcon|lara|carabobo|miranda|aragua|funvisis)\b",
@@ -130,23 +149,38 @@ def make_id(prefix: str, *parts: str) -> str:
     return f"{prefix}:{hashlib.sha1(raw.encode('utf-8')).hexdigest()[:16]}"
 
 
+def is_http_url(value: str) -> bool:
+    return value.startswith("http://") or value.startswith("https://")
+
+
 def load_state(path: Path = STATE_FILE) -> dict:
     if not path.exists():
-        return {"seen_ids": []}
+        return {"seen_ids": [], "url_cache": {}}
     try:
         with path.open("r", encoding="utf-8") as f:
             data = json.load(f)
         if not isinstance(data, dict):
-            return {"seen_ids": []}
+            return {"seen_ids": [], "url_cache": {}}
         data.setdefault("seen_ids", [])
+        data.setdefault("url_cache", {})
+        if not isinstance(data.get("url_cache"), dict):
+            data["url_cache"] = {}
         return data
     except Exception as exc:  # noqa: BLE001
         print(f"Warning: could not read state file: {exc}", file=sys.stderr)
-        return {"seen_ids": []}
+        return {"seen_ids": [], "url_cache": {}}
+
+
+def trim_url_cache(cache: dict[str, str]) -> dict[str, str]:
+    if len(cache) <= URL_CACHE_MAX_ENTRIES:
+        return cache
+    items = list(cache.items())[-URL_CACHE_MAX_ENTRIES:]
+    return dict(items)
 
 
 def save_state(state: dict, path: Path = STATE_FILE) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
+    state["url_cache"] = trim_url_cache(dict(state.get("url_cache", {})))
     tmp = path.with_suffix(".tmp")
     with tmp.open("w", encoding="utf-8") as f:
         json.dump(state, f, ensure_ascii=False, indent=2, sort_keys=True)
@@ -305,9 +339,17 @@ def local_time(value: datetime | None) -> str:
     return value.astimezone(DIGEST_TZ).strftime("%d/%m %H:%M")
 
 
+def local_now_dt() -> datetime:
+    return now_utc().astimezone(DIGEST_TZ)
+
+
 def local_now_label(include_year: bool = True) -> str:
     fmt = "%d/%m/%Y %H:%M" if include_year else "%d/%m %H:%M"
-    return now_utc().astimezone(DIGEST_TZ).strftime(fmt)
+    return local_now_dt().strftime(fmt)
+
+
+def local_today_key() -> str:
+    return local_now_dt().strftime("%Y-%m-%d")
 
 
 def detect_priority(items: Iterable[Item]) -> tuple[str, str]:
@@ -333,16 +375,133 @@ def truncate(value: str, max_len: int = 220) -> str:
     return value[: max_len - 1].rstrip() + "..."
 
 
-def quake_line(item: Item, with_url: bool = False) -> list[str]:
+def get_item_url(item: Item, link_map: dict[str, str] | None = None) -> str:
+    if link_map and item.item_id in link_map:
+        return link_map[item.item_id]
+    return item.url
+
+
+def shorten_url(url: str, cache: dict[str, str] | None = None) -> str:
+    """Return a shortened URL when possible; never fail the monitor because of this."""
+    url = clean_text(url)
+    if not url or not is_http_url(url):
+        return url
+    if URL_SHORTENER in {"", "none", "off", "false"}:
+        return url
+    if cache is not None and url in cache:
+        return cache[url]
+
+    short_url = url
+    try:
+        service = URL_SHORTENER
+        endpoint = "https://is.gd/create.php"
+        if service in {"vgd", "v.gd"}:
+            endpoint = "https://v.gd/create.php"
+        elif service not in {"isgd", "is.gd"}:
+            print(f"Warning: unsupported URL_SHORTENER={service}; using original URL.", file=sys.stderr)
+            return url
+
+        response = requests.get(
+            endpoint,
+            params={"format": "simple", "url": url},
+            headers={"User-Agent": USER_AGENT},
+            timeout=URL_SHORTENER_TIMEOUT,
+        )
+        if response.status_code < 400:
+            candidate = clean_text(response.text)
+            if is_http_url(candidate) and len(candidate) < len(url):
+                short_url = candidate
+        else:
+            print(
+                f"Warning: URL shortener returned HTTP {response.status_code}; using original URL.",
+                file=sys.stderr,
+            )
+    except Exception as exc:  # noqa: BLE001
+        print(f"Warning: URL shortener failed: {exc}; using original URL.", file=sys.stderr)
+
+    if cache is not None:
+        cache[url] = short_url
+    return short_url
+
+
+def build_link_map(
+    items: Iterable[Item],
+    cache: dict[str, str] | None = None,
+    *,
+    shorten: bool = False,
+) -> dict[str, str]:
+    links: dict[str, str] = {}
+    for item in items:
+        if not item.url:
+            continue
+        links[item.item_id] = shorten_url(item.url, cache) if shorten else item.url
+    return links
+
+
+def quake_line(
+    item: Item,
+    *,
+    with_url: bool = False,
+    link_map: dict[str, str] | None = None,
+) -> list[str]:
     depth = f" - profundidad {item.depth_km:.1f} km" if item.depth_km is not None else ""
     mag = f"M{item.mag:.1f}" if item.mag is not None else "Magnitud no informada"
     lines = [f"- {mag} - {item.place} - {local_time(item.published_at)} ART{depth}"]
-    if with_url and item.url:
-        lines.append(f"  Fuente: {item.url}")
+    link = get_item_url(item, link_map)
+    if with_url and link:
+        lines.append(f"  Fuente USGS: {link}")
     return lines
 
 
-def build_full_message(new_items: list[Item]) -> str:
+def build_forward_block(
+    items: list[Item],
+    *,
+    link_map: dict[str, str] | None = None,
+    title: str = "Texto corto para reenviar",
+    max_items: int = 4,
+) -> list[str]:
+    priority_icon, priority_text = detect_priority(items)
+    quakes = [item for item in items if item.kind == "quake"]
+    news = [item for item in items if item.kind == "news"]
+
+    lines: list[str] = [
+        f"{EMOJI_PHONE} {title}:",
+        "",
+        f"{EMOJI_ALERT} Actualizacion sismo Venezuela - {local_now_label(include_year=False)} ART",
+        f"- Prioridad: {priority_icon} {priority_text}",
+    ]
+
+    selected: list[Item] = []
+    selected.extend(quakes[:2])
+    selected.extend(news[: max(0, max_items - len(selected))])
+
+    if selected:
+        for item in selected[:max_items]:
+            link = get_item_url(item, link_map)
+            if item.kind == "quake":
+                mag = f"M{item.mag:.1f}" if item.mag is not None else "sismo"
+                line = f"- {mag} - {truncate(item.place, 85)} - {local_time(item.published_at)} ART"
+            else:
+                line = f"- {truncate(item.title, 110)} ({item.source or 'Medio'})"
+            lines.append(line)
+            if link:
+                lines.append(f"  Fuente: {link}")
+    else:
+        lines.append("- Sin novedades relevantes detectadas en las ultimas 24 h.")
+
+    if len(items) > len(selected):
+        lines.append(f"- +{len(items) - len(selected)} novedades adicionales en el resumen completo.")
+
+    lines.append("- Verificar fuentes oficiales antes de compartir.")
+    return lines
+
+
+def build_full_message(
+    new_items: list[Item],
+    *,
+    link_map: dict[str, str] | None = None,
+    forward_link_map: dict[str, str] | None = None,
+) -> str:
     priority_icon, priority_text = detect_priority(new_items)
     quakes = [item for item in new_items if item.kind == "quake"]
     news = [item for item in new_items if item.kind == "news"]
@@ -358,15 +517,19 @@ def build_full_message(new_items: list[Item]) -> str:
     if quakes:
         lines.extend(["", f"{EMOJI_GLOBE} Sismos nuevos:"])
         for item in quakes[:MAX_QUAKES]:
-            lines.extend(quake_line(item, with_url=True))
+            lines.extend(quake_line(item, with_url=True, link_map=link_map))
 
     if news:
         lines.extend(["", f"{EMOJI_NEWS} Noticias nuevas:"])
         for item in news[:MAX_NEWS]:
             source = item.source or "Medio"
             lines.append(f"- [{source}] {truncate(item.title, 220)}")
-            if item.url:
-                lines.append(f"  {item.url}")
+            link = get_item_url(item, link_map)
+            if link:
+                lines.append(f"  Fuente: {link}")
+
+    if FORWARD_BLOCK_ENABLED:
+        lines.extend(["", *build_forward_block(new_items, link_map=forward_link_map)])
 
     lines.extend(
         [
@@ -377,7 +540,12 @@ def build_full_message(new_items: list[Item]) -> str:
     return "\n".join(lines)
 
 
-def build_compact_discord_message(new_items: list[Item], email_enabled: bool) -> str:
+def build_compact_discord_message(
+    new_items: list[Item],
+    *,
+    email_enabled: bool,
+    link_map: dict[str, str] | None = None,
+) -> str:
     priority_icon, priority_text = detect_priority(new_items)
     quakes = [item for item in new_items if item.kind == "quake"]
     news = [item for item in new_items if item.kind == "news"]
@@ -392,7 +560,7 @@ def build_compact_discord_message(new_items: list[Item], email_enabled: bool) ->
         lines.append("")
         lines.append(f"{EMOJI_GLOBE} Sismos destacados:")
         for item in quakes[:3]:
-            lines.extend(quake_line(item, with_url=False))
+            lines.extend(quake_line(item, with_url=True, link_map=link_map))
         if len(quakes) > 3:
             lines.append(f"- +{len(quakes) - 3} sismos adicionales en el resumen completo.")
 
@@ -401,7 +569,10 @@ def build_compact_discord_message(new_items: list[Item], email_enabled: bool) ->
         lines.append(f"{EMOJI_NEWS} Noticias destacadas:")
         for item in news[:4]:
             source = item.source or "Medio"
-            lines.append(f"- [{source}] {truncate(item.title, 130)}")
+            lines.append(f"- [{source}] {truncate(item.title, 120)}")
+            link = get_item_url(item, link_map)
+            if link:
+                lines.append(f"  {EMOJI_LINK} {link}")
         if len(news) > 4:
             lines.append(f"- +{len(news) - 4} noticias adicionales en el resumen completo.")
 
@@ -422,6 +593,141 @@ def build_empty_message() -> str:
     )
 
 
+def newest_item(items: list[Item]) -> Item | None:
+    dated = [item for item in items if item.published_at]
+    if not dated:
+        return items[0] if items else None
+    return max(dated, key=lambda item: item.published_at or datetime.min.replace(tzinfo=timezone.utc))
+
+
+def max_magnitude_label(quakes: list[Item]) -> str:
+    mags = [item.mag for item in quakes if item.mag is not None]
+    if not mags:
+        return "sin datos"
+    return f"M{max(mags):.1f}"
+
+
+def build_daily_summary_message(
+    items_24h: list[Item],
+    *,
+    errors: list[str] | None = None,
+    link_map: dict[str, str] | None = None,
+    forward_link_map: dict[str, str] | None = None,
+) -> str:
+    errors = errors or []
+    quakes = [item for item in items_24h if item.kind == "quake"]
+    news = [item for item in items_24h if item.kind == "news"]
+    priority_icon, priority_text = detect_priority(items_24h)
+    latest = newest_item(items_24h)
+
+    lines: list[str] = [
+        f"{EMOJI_PIN} Resumen diario - Sismo Venezuela - {local_now_label()} ART",
+        "",
+        "Ultimas 24 h:",
+        f"- Estado: {priority_icon} {priority_text}",
+        f"- Eventos sismicos detectados: {len(quakes)}",
+        f"- Mayor magnitud registrada: {max_magnitude_label(quakes)}",
+        f"- Noticias relevantes detectadas: {len(news)}",
+        "- Fuentes revisadas: USGS + RSS de noticias configurados",
+    ]
+
+    if latest:
+        lines.append(f"- Ultima novedad detectada: {truncate(latest.title, 140)} - {local_time(latest.published_at)} ART")
+    else:
+        lines.append("- Ultima novedad detectada: sin novedades relevantes en las fuentes monitoreadas.")
+
+    if errors:
+        lines.append(f"- Avisos tecnicos: {len(errors)} fuente(s) respondieron con advertencias. Revisar logs de GitHub Actions.")
+
+    if quakes:
+        lines.extend(["", f"{EMOJI_GLOBE} Sismos relevantes:"])
+        for item in quakes[:MAX_QUAKES]:
+            lines.extend(quake_line(item, with_url=True, link_map=link_map))
+
+    if news:
+        lines.extend(["", f"{EMOJI_NEWS} Noticias relevantes:"])
+        for item in news[:MAX_NEWS]:
+            source = item.source or "Medio"
+            lines.append(f"- [{source}] {truncate(item.title, 220)}")
+            link = get_item_url(item, link_map)
+            if link:
+                lines.append(f"  Fuente: {link}")
+
+    if FORWARD_BLOCK_ENABLED:
+        lines.extend(
+            [
+                "",
+                *build_forward_block(
+                    items_24h,
+                    link_map=forward_link_map,
+                    title="Texto corto para reenviar",
+                ),
+            ]
+        )
+
+    lines.extend(
+        [
+            "",
+            f"{EMOJI_CHECK} Monitoreo automatico activo.",
+            f"{EMOJI_WARN} Verificar comunicados oficiales antes de reenviar datos sensibles.",
+        ]
+    )
+    return "\n".join(lines)
+
+
+def build_daily_summary_discord(
+    items_24h: list[Item],
+    *,
+    errors: list[str] | None = None,
+    link_map: dict[str, str] | None = None,
+    email_enabled: bool = False,
+) -> str:
+    errors = errors or []
+    quakes = [item for item in items_24h if item.kind == "quake"]
+    news = [item for item in items_24h if item.kind == "news"]
+    priority_icon, priority_text = detect_priority(items_24h)
+    latest = newest_item(items_24h)
+
+    lines: list[str] = [
+        f"{EMOJI_PIN} Resumen diario sismo Venezuela - {local_now_label()} ART",
+        f"- Estado: {priority_icon} {priority_text}",
+        f"- Sismos 24 h: {len(quakes)} | Mayor magnitud: {max_magnitude_label(quakes)}",
+        f"- Noticias 24 h: {len(news)}",
+    ]
+
+    if latest:
+        lines.append(f"- Ultima novedad: {truncate(latest.title, 100)}")
+    else:
+        lines.append("- Sin novedades relevantes en las ultimas 24 h.")
+
+    if quakes:
+        lines.append("")
+        lines.append(f"{EMOJI_GLOBE} Sismos principales:")
+        for item in quakes[:2]:
+            lines.extend(quake_line(item, with_url=True, link_map=link_map))
+
+    if news:
+        lines.append("")
+        lines.append(f"{EMOJI_NEWS} Noticias principales:")
+        for item in news[:3]:
+            lines.append(f"- [{item.source or 'Medio'}] {truncate(item.title, 105)}")
+            link = get_item_url(item, link_map)
+            if link:
+                lines.append(f"  {EMOJI_LINK} {link}")
+
+    if errors:
+        lines.append("")
+        lines.append(f"{EMOJI_WARN} Hubo {len(errors)} aviso(s) tecnico(s). Revisar logs.")
+
+    lines.append("")
+    if email_enabled:
+        lines.append(f"{EMOJI_MAIL} Detalle completo enviado por correo.")
+    else:
+        lines.append(f"{EMOJI_MAIL} Correo no configurado; Discord muestra resumen diario compacto.")
+    lines.append(f"{EMOJI_WARN} Verificar fuentes oficiales antes de reenviar.")
+    return "\n".join(lines)
+
+
 def build_subject(new_items: list[Item]) -> str:
     if not new_items:
         return f"Sismo Venezuela - sin novedades - {local_now_label(include_year=False)} ART"
@@ -431,6 +737,18 @@ def build_subject(new_items: list[Item]) -> str:
     return (
         f"Sismo Venezuela - {priority_text} - {len(new_items)} novedades "
         f"({len(quakes)} sismos / {len(news)} noticias) - {local_now_label(include_year=False)} ART"
+    )
+
+
+def build_daily_subject(items_24h: list[Item]) -> str:
+    quakes = [item for item in items_24h if item.kind == "quake"]
+    news = [item for item in items_24h if item.kind == "news"]
+    _, priority_text = detect_priority(items_24h)
+    if not items_24h:
+        return f"Resumen diario - Sismo Venezuela - sin novedades - {local_now_label(include_year=False)} ART"
+    return (
+        f"Resumen diario - Sismo Venezuela - {priority_text} - "
+        f"{len(quakes)} sismos / {len(news)} noticias - {local_now_label(include_year=False)} ART"
     )
 
 
@@ -578,28 +896,35 @@ def send_email(subject: str, body: str) -> None:
             server.send_message(msg)
 
 
-def send_notifications(full_message: str, discord_message: str, subject: str) -> None:
-    """Send notifications. State updates after at least one channel succeeds."""
+def send_notifications(
+    full_message: str,
+    discord_message: str,
+    subject: str,
+    *,
+    use_discord: bool = True,
+    use_email: bool = True,
+) -> list[str]:
+    """Send notifications. Caller updates state after at least one channel succeeds."""
     successes: list[str] = []
     failures: list[tuple[str, Exception]] = []
 
-    if is_discord_enabled():
+    if use_discord and is_discord_enabled():
         try:
             message = full_message if DISCORD_MESSAGE_MODE == "full" else discord_message
             send_discord(message)
             successes.append("Discord")
         except Exception as exc:  # noqa: BLE001
             failures.append(("Discord", exc))
-    else:
+    elif use_discord:
         print("Discord not configured/enabled; skipping Discord send.")
 
-    if is_email_enabled():
+    if use_email and is_email_enabled():
         try:
             send_email(subject, full_message)
             successes.append("Email")
         except Exception as exc:  # noqa: BLE001
             failures.append(("Email", exc))
-    else:
+    elif use_email:
         print("Email not configured/enabled; skipping email send.")
 
     for channel, exc in failures:
@@ -614,15 +939,45 @@ def send_notifications(full_message: str, discord_message: str, subject: str) ->
         if failures:
             details = "; ".join(f"{channel}: {exc}" for channel, exc in failures)
             raise RuntimeError(f"All notification channels failed: {details}")
-        raise RuntimeError("No notification channel configured. Configure Discord or SMTP email secrets.")
+        raise RuntimeError("No notification channel configured/enabled for this message.")
 
     print(f"Notification sent through: {', '.join(successes)}")
+    return successes
+
+
+def should_send_daily_summary(state: dict) -> bool:
+    if FORCE_DAILY_SUMMARY:
+        return True
+    if not DAILY_SUMMARY_ENABLED:
+        return False
+    today = local_today_key()
+    if state.get("last_daily_summary_date") == today:
+        return False
+    return local_now_dt().hour >= DAILY_SUMMARY_HOUR
+
+
+def deduplicate_items(items: list[Item]) -> list[Item]:
+    unique: list[Item] = []
+    local_ids: set[str] = set()
+    for item in items:
+        if item.item_id not in local_ids:
+            unique.append(item)
+            local_ids.add(item.item_id)
+    return unique
+
+
+def make_link_maps(items: list[Item], url_cache: dict[str, str]) -> tuple[dict[str, str], dict[str, str], dict[str, str]]:
+    full_links = build_link_map(items, shorten=False)
+    discord_links = build_link_map(items, url_cache, shorten=SHORTEN_URLS_FOR_DISCORD)
+    forward_links = build_link_map(items, url_cache, shorten=SHORTEN_URLS_FOR_FORWARD)
+    return full_links, discord_links, forward_links
 
 
 def main() -> int:
     state = load_state()
     seen_ids = list(dict.fromkeys(state.get("seen_ids", [])))
     seen_set = set(seen_ids)
+    url_cache: dict[str, str] = dict(state.get("url_cache", {}))
 
     errors: list[str] = []
     items: list[Item] = []
@@ -637,14 +992,7 @@ def main() -> int:
     except Exception as exc:  # noqa: BLE001
         errors.append(f"News RSS: {exc}")
 
-    # Deduplicate while preserving order.
-    unique: list[Item] = []
-    local_ids: set[str] = set()
-    for item in items:
-        if item.item_id not in local_ids:
-            unique.append(item)
-            local_ids.add(item.item_id)
-
+    unique = deduplicate_items(items)
     new_items = unique if FORCE_SEND else [item for item in unique if item.item_id not in seen_set]
 
     if errors:
@@ -652,25 +1000,73 @@ def main() -> int:
         for err in errors:
             print(f"- {err}", file=sys.stderr)
 
-    if not new_items:
+    state_changed = False
+
+    if new_items:
+        full_links, discord_links, forward_links = make_link_maps(new_items, url_cache)
+        full_message = build_full_message(
+            new_items,
+            link_map=full_links,
+            forward_link_map=forward_links,
+        )
+        discord_message = build_compact_discord_message(
+            new_items,
+            email_enabled=is_email_enabled(),
+            link_map=discord_links,
+        )
+        send_notifications(full_message, discord_message, build_subject(new_items))
+
+        # Only update seen state after at least one successful notification channel.
+        new_seen = [item.item_id for item in new_items] + seen_ids
+        state["seen_ids"] = list(dict.fromkeys(new_seen))[:1000]
+        state["last_sent_at"] = now_utc().isoformat(timespec="seconds")
+        state["last_sent_count"] = len(new_items)
+        state_changed = True
+        print(f"Sent digest with {len(new_items)} new items.")
+    else:
         print("No new items detected.")
         if SEND_EMPTY_DIGEST:
             full_message = build_empty_message()
             send_notifications(full_message, full_message, build_subject([]))
-        return 0
 
-    full_message = build_full_message(new_items)
-    discord_message = build_compact_discord_message(new_items, email_enabled=is_email_enabled())
-    send_notifications(full_message, discord_message, build_subject(new_items))
+    if should_send_daily_summary(state):
+        full_links, discord_links, forward_links = make_link_maps(unique, url_cache)
+        daily_full = build_daily_summary_message(
+            unique,
+            errors=errors,
+            link_map=full_links,
+            forward_link_map=forward_links,
+        )
+        daily_discord = build_daily_summary_discord(
+            unique,
+            errors=errors,
+            link_map=discord_links,
+            email_enabled=DAILY_SUMMARY_TO_EMAIL and is_email_enabled(),
+        )
+        try:
+            send_notifications(
+                daily_full,
+                daily_discord,
+                build_daily_subject(unique),
+                use_discord=DAILY_SUMMARY_TO_DISCORD,
+                use_email=DAILY_SUMMARY_TO_EMAIL,
+            )
+            state["last_daily_summary_date"] = local_today_key()
+            state["last_daily_summary_at"] = now_utc().isoformat(timespec="seconds")
+            state["last_daily_summary_count"] = len(unique)
+            state_changed = True
+            print(f"Sent daily summary with {len(unique)} items from the last {LOOKBACK_HOURS} h.")
+        except Exception as exc:  # noqa: BLE001
+            print(f"Warning: daily summary failed: {exc}", file=sys.stderr)
+            if not state_changed:
+                raise
 
-    # Only update state after at least one successful notification channel.
-    new_seen = [item.item_id for item in new_items] + seen_ids
-    state["seen_ids"] = list(dict.fromkeys(new_seen))[:1000]
-    state["last_sent_at"] = now_utc().isoformat(timespec="seconds")
-    state["last_sent_count"] = len(new_items)
-    save_state(state)
+    state["url_cache"] = trim_url_cache(url_cache)
+    if state_changed:
+        save_state(state)
+    else:
+        print("No state changes to save.")
 
-    print(f"Sent digest with {len(new_items)} new items.")
     return 0
 
 

@@ -11,6 +11,11 @@ on:
         required: false
         default: false
         type: boolean
+      send_daily_summary:
+        description: "Send the daily status summary now"
+        required: false
+        default: false
+        type: boolean
 
 permissions:
   contents: write
@@ -25,12 +30,12 @@ jobs:
 
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
         with:
           fetch-depth: 0
 
       - name: Set up Python
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@v6
         with:
           python-version: "3.11"
           cache: "pip"
@@ -49,6 +54,19 @@ jobs:
           DISCORD_MESSAGE_MODE: "compact"
           DISCORD_MAX_CHARS: "1800"
           DISCORD_STRICT: "false"
+
+          # Discord/WhatsApp-friendly links
+          SHORTEN_URLS_FOR_DISCORD: "true"
+          SHORTEN_URLS_FOR_FORWARD: "true"
+          URL_SHORTENER: "isgd"
+
+          # Daily status summary
+          DAILY_SUMMARY_ENABLED: "true"
+          DAILY_SUMMARY_HOUR: "9"
+          DAILY_SUMMARY_TO_DISCORD: "true"
+          DAILY_SUMMARY_TO_EMAIL: "true"
+          FORCE_DAILY_SUMMARY: ${{ github.event_name == 'workflow_dispatch' && inputs.send_daily_summary || false }}
+          FORWARD_BLOCK_ENABLED: "true"
 
           # Email / SMTP
           SMTP_HOST: ${{ secrets.SMTP_HOST }}
