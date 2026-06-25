@@ -1,7 +1,9 @@
 {
-  "last_sent_at": "2026-06-25T20:37:44+00:00",
-  "last_sent_count": 12,
+  "last_sent_at": "2026-06-25T21:10:23+00:00",
+  "last_sent_count": 2,
   "seen_ids": [
+    "news:e964f4d501e46728",
+    "news:137d02b45c9544f2",
     "quake:us6000t81p",
     "quake:us6000t80d",
     "quake:us6000t7zp",
