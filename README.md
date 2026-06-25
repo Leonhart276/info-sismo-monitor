@@ -1,31 +1,13 @@
-# Sismo Venezuela -> Discord monitor
+# Sismo Venezuela -> Discord + correo
 
-Automatizacion para GitHub Actions que revisa cada hora fuentes publicas sobre sismos/noticias relacionadas con Venezuela y publica un resumen por puntos en Discord cuando encuentra novedades.
+Automatizacion para GitHub Actions que revisa cada hora fuentes publicas sobre sismos/noticias relacionadas con Venezuela y envia novedades.
 
-## Que hace
+- Discord recibe un resumen compacto para evitar recortes.
+- El correo recibe el resumen completo con links.
+- WhatsApp fue eliminado de esta version.
+- El archivo `state/state.json` evita repetir noticias ya enviadas.
 
-- Consulta eventos sismicos en USGS dentro de una caja geografica que cubre Venezuela y zonas cercanas.
-- Consulta RSS publicos de Google News con busquedas sobre sismo/terremoto/replicas/FUNVISIS/Proteccion Civil Venezuela.
-- Filtra duplicados con `state/state.json`.
-- Envia a Discord solo si hay novedades, para no repetir el mismo mensaje cada hora.
-- Permite ejecucion manual desde la pestaña Actions de GitHub.
-
-## Lo que tenes que configurar
-
-### 1. Crear el webhook en Discord
-
-1. Crea un servidor privado o usa uno existente.
-2. Crea un canal, por ejemplo `#sismo-venezuela`.
-3. En el canal: **Edit Channel** -> **Integrations** -> **Webhooks**.
-4. Crea un webhook nuevo.
-5. Copia la URL del webhook.
-
-No pegues esa URL en chats ni en archivos del repo. Es una credencial.
-
-### 2. Crear el repo en GitHub
-
-1. Crea un repo privado, por ejemplo `sismo-venezuela-monitor`.
-2. Sube estos archivos respetando la estructura:
+## Estructura
 
 ```txt
 .github/workflows/sismo-monitor.yml
@@ -36,89 +18,130 @@ README.md
 state/.gitkeep
 ```
 
-### 3. Guardar el webhook como secret
+## 1. Mantener Discord
 
-En GitHub:
+Si ya tenias el webhook funcionando, no cambies el secret:
 
-1. Repo -> **Settings**.
-2. **Secrets and variables** -> **Actions**.
-3. **New repository secret**.
-4. Name: `DISCORD_WEBHOOK_URL`.
-5. Secret: pega la URL del webhook de Discord.
-
-### 4. Permitir escritura del workflow
-
-El workflow necesita actualizar `state/state.json` para recordar que ya envio una noticia.
-
-En GitHub:
-
-1. Repo -> **Settings** -> **Actions** -> **General**.
-2. En **Workflow permissions**, deja habilitado permiso de escritura si tu cuenta/organizacion lo requiere.
-
-El archivo YAML ya incluye:
-
-```yaml
-permissions:
-  contents: write
+```txt
+DISCORD_WEBHOOK_URL
 ```
 
-### 5. Probar manualmente
+El YAML usa:
 
-1. Ve a la pestaña **Actions**.
-2. Selecciona **Monitor Sismo Venezuela**.
-3. Click en **Run workflow**.
-4. Para la primera prueba podes activar `force_send`.
+```yaml
+DISCORD_MESSAGE_MODE: "compact"
+DISCORD_MAX_CHARS: "1800"
+```
 
-El primer envio puede incluir varias novedades de las ultimas 24 horas. Despues solo deberia enviar items nuevos.
+Con esto Discord manda una alerta corta y evita el mensaje de recorte.
 
-## Configuracion rapida
+Si algun dia queres que Discord mande el resumen completo en varias partes, cambia:
 
-En `.github/workflows/sismo-monitor.yml` podes ajustar:
+```yaml
+DISCORD_MESSAGE_MODE: "full"
+```
+
+## 2. Agregar correo
+
+Crea estos secrets en GitHub:
+
+```txt
+SMTP_HOST
+SMTP_PORT
+SMTP_USERNAME
+SMTP_PASSWORD
+EMAIL_FROM
+EMAIL_TO
+```
+
+Opcional:
+
+```txt
+EMAIL_REPLY_TO
+```
+
+`EMAIL_TO` puede tener uno o varios destinatarios separados por coma.
+
+## Ejemplo con Gmail
+
+```txt
+SMTP_HOST=smtp.gmail.com
+SMTP_PORT=587
+SMTP_USERNAME=tu_correo@gmail.com
+SMTP_PASSWORD=tu_app_password_de_google
+EMAIL_FROM=tu_correo@gmail.com
+EMAIL_TO=tu_correo@gmail.com
+```
+
+En Gmail conviene usar una app password, no tu clave normal de la cuenta.
+
+## Ejemplo con Microsoft 365 / Outlook
+
+```txt
+SMTP_HOST=smtp.office365.com
+SMTP_PORT=587
+SMTP_USERNAME=tu_correo@tudominio.com
+SMTP_PASSWORD=tu_password_o_app_password
+EMAIL_FROM=tu_correo@tudominio.com
+EMAIL_TO=tu_correo@tudominio.com
+```
+
+## 3. Subir cambios al repo
+
+Reemplaza estos archivos en tu repo actual:
+
+```txt
+.github/workflows/sismo-monitor.yml
+src/sismo_monitor.py
+README.md
+```
+
+No borres tu `state/state.json` si ya existe, porque ahi esta el historial de lo enviado.
+
+## 4. Probar manualmente
+
+En GitHub:
+
+1. Repo -> Actions.
+2. Monitor Sismo Venezuela.
+3. Run workflow.
+4. Activa `force_send` para forzar una prueba aunque ya haya enviado esas noticias antes.
+
+## Comportamiento esperado
+
+Si hay novedades:
+
+- Discord recibe un mensaje compacto.
+- Correo recibe el resumen completo.
+- Se actualiza `state/state.json`.
+
+Si no hay novedades:
+
+- No envia nada por defecto.
+
+Para enviar tambien cuando no hay novedades, cambia:
+
+```yaml
+SEND_EMPTY_DIGEST: "true"
+```
+
+## Ajustes utiles
 
 ```yaml
 LOOKBACK_HOURS: "24"
 MIN_MAGNITUDE: "2.5"
 MAX_NEWS: "8"
 MAX_QUAKES: "8"
-SEND_EMPTY_DIGEST: "false"
+EMAIL_STRICT: "false"
+DISCORD_STRICT: "false"
 ```
 
-- `LOOKBACK_HOURS`: ventana de busqueda.
-- `MIN_MAGNITUDE`: magnitud minima USGS.
-- `SEND_EMPTY_DIGEST`: si lo pones en `true`, enviara tambien mensajes de "sin novedades".
+- `EMAIL_STRICT: "false"`: si el correo falla pero Discord funciona, el workflow no se rompe.
+- `DISCORD_STRICT: "false"`: si Discord falla pero el correo funciona, el workflow no se rompe.
+- Si ambos fallan, el workflow falla y no marca las novedades como enviadas.
 
-## Cambiar busquedas de noticias
+## Seguridad
 
-Por defecto usa estas consultas:
+No pegues webhooks, passwords SMTP ni app passwords en archivos del repo. Guardalos solo como GitHub Secrets.
 
-- `(sismo OR terremoto OR temblor OR replicas OR replica) Venezuela when:1d`
-- `FUNVISIS sismo Venezuela when:1d`
-- `Proteccion Civil Venezuela sismo when:1d`
-
-Tambien podes pasar URLs RSS propias con la variable `NEWS_RSS_URLS`, separadas por coma.
-
-## Formato de mensaje
-
-Ejemplo:
-
-```txt
-Actualizacion sismo Venezuela - 25/06/2026 16:07 ART
-
-Resumen por puntos:
-- Prioridad: Alta
-- Novedades detectadas: 4 (1 sismos / 3 noticias)
-
-Sismos nuevos:
-- M4.8 - 20 km al norte de ... - 25/06 15:41 ART - profundidad 10.0 km
-  Fuente: https://earthquake.usgs.gov/...
-
-Noticias nuevas:
-- [Medio] Titulo de la noticia...
-  https://news.google.com/...
-
-Verificar comunicados oficiales antes de reenviar datos sensibles.
-```
-
-## Nota importante
-
-Esto no reemplaza fuentes oficiales ni servicios de emergencia. Es un digest automatico para ayudarte a monitorear novedades y reenviarlas con criterio.
+Esto no reemplaza fuentes oficiales ni servicios de emergencia. Es un digest automatico para monitoreo y reenvio con criterio.

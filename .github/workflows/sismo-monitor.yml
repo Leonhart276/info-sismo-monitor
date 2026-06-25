@@ -2,7 +2,7 @@ name: Monitor Sismo Venezuela
 
 on:
   schedule:
-    # Runs hourly at minute 7. GitHub schedules use UTC unless a timezone is set.
+    # Runs hourly at minute 7. GitHub schedules use UTC.
     - cron: "7 * * * *"
   workflow_dispatch:
     inputs:
@@ -40,7 +40,29 @@ jobs:
 
       - name: Run monitor
         env:
+          # Channels
+          SEND_DISCORD: "auto"
+          SEND_EMAIL: "auto"
+
+          # Discord
           DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}
+          DISCORD_MESSAGE_MODE: "compact"
+          DISCORD_MAX_CHARS: "1800"
+          DISCORD_STRICT: "false"
+
+          # Email / SMTP
+          SMTP_HOST: ${{ secrets.SMTP_HOST }}
+          SMTP_PORT: ${{ secrets.SMTP_PORT }}
+          SMTP_USERNAME: ${{ secrets.SMTP_USERNAME }}
+          SMTP_PASSWORD: ${{ secrets.SMTP_PASSWORD }}
+          SMTP_USE_TLS: "true"
+          SMTP_USE_SSL: "false"
+          EMAIL_FROM: ${{ secrets.EMAIL_FROM }}
+          EMAIL_TO: ${{ secrets.EMAIL_TO }}
+          EMAIL_REPLY_TO: ${{ secrets.EMAIL_REPLY_TO }}
+          EMAIL_STRICT: "false"
+
+          # Monitor config
           DIGEST_TZ: America/Argentina/Buenos_Aires
           LOOKBACK_HOURS: "24"
           MIN_MAGNITUDE: "2.5"
