@@ -449,7 +449,7 @@ def quake_line(
     lines = [f"- {mag} - {item.place} - {local_time(item.published_at)} ART{depth}"]
     link = get_item_url(item, link_map)
     if with_url and link:
-        lines.append(f"  Fuente USGS: {link}")
+        lines.append(f"  Fuente USGS: <{link}>")
     return lines
 
 
@@ -572,7 +572,7 @@ def build_compact_discord_message(
             lines.append(f"- [{source}] {truncate(item.title, 120)}")
             link = get_item_url(item, link_map)
             if link:
-                lines.append(f"  {EMOJI_LINK} {link}")
+                lines.append(f"  {EMOJI_LINK} <{link}>")
         if len(news) > 4:
             lines.append(f"- +{len(news) - 4} noticias adicionales en el resumen completo.")
 
@@ -713,7 +713,7 @@ def build_daily_summary_discord(
             lines.append(f"- [{item.source or 'Medio'}] {truncate(item.title, 105)}")
             link = get_item_url(item, link_map)
             if link:
-                lines.append(f"  {EMOJI_LINK} {link}")
+                lines.append(f"  {EMOJI_LINK} <{link}>")
 
     if errors:
         lines.append("")
@@ -835,6 +835,7 @@ def send_discord(message: str) -> None:
             "content": content,
             "username": "Sismo Venezuela Monitor",
             "allowed_mentions": {"parse": []},
+            "flags":4,
         }
         response = requests.post(f"{webhook_url}?wait=true", json=payload, timeout=30)
         if response.status_code >= 400:
