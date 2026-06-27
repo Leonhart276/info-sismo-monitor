@@ -1,15 +1,23 @@
-# Sismo Venezuela -> Discord + correo
+# Sismo Venezuela Monitor
 
-Automatizacion para GitHub Actions que revisa cada hora fuentes publicas sobre sismos/noticias relacionadas con Venezuela y envia novedades.
+Monitor automatico para seguir sismos y noticias relacionadas con Venezuela, pensado para ejecutarse con GitHub Actions y enviar avisos a Discord y/o correo electronico.
 
-Esta version agrega:
+El proyecto consulta fuentes publicas, arma un resumen compacto para Discord, envia un resumen completo por email cuando corresponde, evita repetir noticias ya enviadas y guarda estado en el repositorio para recordar que contenido ya fue notificado.
 
-- Discord compacto con enlaces a fuentes/noticias.
-- Enlaces cortos para Discord y el bloque de reenvio.
-- Correo completo con detalle y links completos.
-- Bloque corto listo para copiar y reenviar por WhatsApp.
-- Resumen diario automatico una vez al dia.
-- `state/state.json` para evitar repetir noticias y para recordar el ultimo resumen diario enviado.
+> Este monitor no reemplaza fuentes oficiales, servicios de emergencia ni criterio humano. Es una herramienta de seguimiento y reenvio responsable.
+
+## Que hace
+
+- Consulta eventos sismicos de USGS dentro de una zona que cubre Venezuela y areas cercanas.
+- Busca noticias relevantes sobre sismos, replicas, terremotos y reportes oficiales.
+- Prioriza fuentes conocidas y permite bloquear republicadores ruidosos.
+- Deduplica noticias similares aunque Google News entregue enlaces o titulares ligeramente distintos.
+- Evita enviar una notificacion si el contenido no cambio desde el ultimo envio.
+- Publica un mensaje compacto en Discord mediante webhook.
+- Puede enviar un correo completo por SMTP.
+- Incluye un bloque corto listo para reenviar por WhatsApp.
+- Puede enviar un resumen diario una vez al dia.
+- Actualiza `state/state.json` para mantener historial entre ejecuciones.
 
 ## Estructura
 
@@ -20,31 +28,95 @@ requirements.txt
 README.md
 .gitignore
 state/.gitkeep
+state/state.json
 ```
 
-## 1. Archivos a reemplazar
+`state/state.json` se crea o actualiza automaticamente. No lo borres si ya esta en uso, porque ahi se guarda que eventos, noticias y resumenes ya fueron enviados.
 
-En tu repo actual reemplaza:
+## Como funciona
+
+Cada ejecucion hace lo siguiente:
+
+1. Lee el estado anterior desde `state/state.json`.
+2. Consulta USGS para eventos sismicos recientes.
+3. Consulta fuentes RSS/Google News configuradas para noticias relevantes.
+4. Filtra contenido no relacionado con Venezuela o sismos.
+5. Deduplica eventos y noticias.
+6. Compara el resultado actual con lo enviado anteriormente.
+7. Si hay cambios, envia Discord/correo segun configuracion.
+8. Si el envio fue exitoso por al menos un canal, actualiza el estado.
+9. GitHub Actions commitea el nuevo `state/state.json`.
+
+Por defecto el workflow corre cada hora:
+
+```yaml
+schedule:
+  - cron: "7 * * * *"
+```
+
+GitHub interpreta ese cron en UTC.
+
+## Fuentes
+
+Eventos sismicos:
 
 ```txt
-.github/workflows/sismo-monitor.yml
-src/sismo_monitor.py
-README.md
+USGS Earthquake Catalog API
 ```
 
-No borres `state/state.json` si ya existe, porque ahi esta el historial de lo enviado.
+Noticias:
 
-## 2. Secrets necesarios
+```txt
+Google News RSS general para Venezuela
+Google News RSS dirigido a FUNVISIS
+Google News RSS dirigido a Proteccion Civil
+Consultas dirigidas a ReliefWeb, GDACS, Reuters, AP, BBC Mundo y medios venezolanos
+```
 
-Si ya te llego el correo y Discord, no tenes que cambiar secrets.
+Tambien se pueden reemplazar las fuentes de noticias por RSS propios con `NEWS_RSS_URLS`.
 
-Discord:
+## Configuracion rapida
+
+1. Crea o clona un repositorio con estos archivos.
+2. Activa GitHub Actions en el repositorio.
+3. Agrega los secrets necesarios en `Settings -> Secrets and variables -> Actions`.
+4. Configura el webhook de Discord y/o SMTP.
+5. Ejecuta manualmente el workflow desde `Actions -> Monitor Sismo Venezuela -> Run workflow`.
+
+El workflow ya incluye la configuracion base para Venezuela:
+
+```yaml
+DIGEST_TZ: America/Caracas
+DIGEST_TZ_LABEL: VET
+LOOKBACK_HOURS: "72"
+MIN_MAGNITUDE: "2.5"
+MAX_NEWS: "12"
+MAX_QUAKES: "8"
+NOTIFY_ONLY_ON_CHANGE: "true"
+SEND_EMPTY_DIGEST: "false"
+```
+
+## Secrets
+
+### Discord
+
+Para enviar mensajes a Discord necesitas un webhook:
 
 ```txt
 DISCORD_WEBHOOK_URL
 ```
 
-Correo / SMTP:
+En Discord:
+
+1. Abre el servidor y canal donde quieres recibir alertas.
+2. Entra a `Edit Channel -> Integrations -> Webhooks`.
+3. Crea un webhook.
+4. Copia la URL.
+5. Guardala como secret `DISCORD_WEBHOOK_URL`.
+
+### Correo SMTP
+
+Para enviar correo configura estos secrets:
 
 ```txt
 SMTP_HOST
@@ -61,7 +133,9 @@ Opcional:
 EMAIL_REPLY_TO
 ```
 
-## 3. Ejemplo con Gmail
+`EMAIL_TO` acepta varios destinatarios separados por coma o punto y coma.
+
+Ejemplo con Gmail:
 
 ```txt
 SMTP_HOST=smtp.gmail.com
@@ -69,159 +143,245 @@ SMTP_PORT=587
 SMTP_USERNAME=tu_correo@gmail.com
 SMTP_PASSWORD=tu_app_password_de_google
 EMAIL_FROM=tu_correo@gmail.com
-EMAIL_TO=tu_correo@gmail.com
+EMAIL_TO=destino1@gmail.com,destino2@gmail.com
 ```
 
-`EMAIL_TO` puede tener uno o varios destinatarios separados por coma.
+Para Gmail debes usar una app password, no la clave normal de la cuenta.
 
-## 4. Discord con enlaces cortos
+## Variables principales
 
-El workflow usa:
+### Canales
+
+```yaml
+SEND_DISCORD: "auto"
+SEND_EMAIL: "auto"
+DISCORD_STRICT: "false"
+EMAIL_STRICT: "false"
+```
+
+`auto` activa el canal solo si existen los secrets requeridos.
+
+Con `DISCORD_STRICT=false` o `EMAIL_STRICT=false`, si un canal falla pero el otro funciona, el workflow no falla. Si ambos canales fallan, la ejecucion falla y no marca las novedades como enviadas.
+
+### Discord
 
 ```yaml
 DISCORD_MESSAGE_MODE: "compact"
 DISCORD_MAX_CHARS: "1800"
 SHORTEN_URLS_FOR_DISCORD: "true"
-SHORTEN_URLS_FOR_FORWARD: "true"
 URL_SHORTENER: "isgd"
 ```
 
-Con eso Discord muestra un resumen corto, pero incluye links de las noticias/fuentes destacadas.
+`compact` manda a Discord un resumen corto con enlaces. El correo, si esta activo, recibe el detalle completo.
 
-Si algun dia el acortador falla, el script no se rompe: usa el enlace original.
+Para mandar todo a Discord:
+
+```yaml
+DISCORD_MESSAGE_MODE: "full"
+```
 
 Para desactivar enlaces cortos:
 
 ```yaml
+URL_SHORTENER: "none"
 SHORTEN_URLS_FOR_DISCORD: "false"
 SHORTEN_URLS_FOR_FORWARD: "false"
 ```
 
-Tambien podes usar `v.gd`:
+### Monitoreo
 
 ```yaml
-URL_SHORTENER: "vgd"
+LOOKBACK_HOURS: "72"
+MIN_MAGNITUDE: "2.5"
+MAX_NEWS: "12"
+MAX_QUAKES: "8"
+NEWS_FEED_TIMEOUT: "30"
 ```
 
-O desactivar completamente el acortador:
+- `LOOKBACK_HOURS`: ventana de busqueda hacia atras.
+- `MIN_MAGNITUDE`: magnitud minima para eventos USGS.
+- `MAX_NEWS`: maximo de noticias incluidas.
+- `MAX_QUAKES`: maximo de sismos incluidos.
+- `NEWS_FEED_TIMEOUT`: timeout por fuente RSS.
+
+### Fuentes de noticias
+
+Para reemplazar las busquedas por tus propios RSS:
 
 ```yaml
-URL_SHORTENER: "none"
+NEWS_RSS_URLS: "https://example.com/feed.xml,https://example.org/rss"
 ```
 
-## 5. Resumen diario automatico
-
-El workflow corre cada hora, pero el resumen diario se envia una sola vez por dia cuando la hora local sea igual o posterior a:
+Para bloquear fuentes ruidosas:
 
 ```yaml
-DAILY_SUMMARY_HOUR: "9"
+NEWS_SOURCE_BLOCKLIST: "\\b(vietnam\\.vn)\\b"
 ```
 
-La zona horaria esta configurada en:
+El valor es una expresion regular.
+
+### Deduplicacion y cambios
 
 ```yaml
-DIGEST_TZ: America/Argentina/Buenos_Aires
+NOTIFY_ONLY_ON_CHANGE: "true"
+SEND_EMPTY_DIGEST: "false"
 ```
 
-El resumen diario incluye:
+El monitor no envia nada si:
+
+- No hay eventos o noticias nuevas.
+- El conjunto de contenido detectado coincide con el ultimo digest enviado.
+- Ya se envio el resumen diario de ese dia y no se forzo manualmente.
+
+La deduplicacion usa:
 
 ```txt
-- Estado general de las ultimas 24 h
-- Total de sismos detectados
-- Mayor magnitud registrada
-- Noticias relevantes detectadas
-- Ultima novedad
-- Links principales
-- Bloque corto listo para WhatsApp
+ID del evento sismico
+Huella estable del titulo de noticia
+Huella del digest completo enviado
 ```
 
-Para enviarlo por Discord y correo:
+Esto ayuda cuando Google News entrega el mismo articulo con otro enlace o cuando varios medios publican titulares casi iguales.
+
+### Resumen diario
 
 ```yaml
+DAILY_SUMMARY_ENABLED: "true"
+DAILY_SUMMARY_HOUR: "9"
 DAILY_SUMMARY_TO_DISCORD: "true"
 DAILY_SUMMARY_TO_EMAIL: "true"
 ```
 
-Si queres que el resumen diario llegue solo por correo:
+El resumen diario se envia una vez al dia cuando la hora local sea igual o posterior a `DAILY_SUMMARY_HOUR`.
+
+Si el contenido no cambio desde el ultimo resumen y `NOTIFY_ONLY_ON_CHANGE=true`, el resumen se salta y queda registrado en el estado.
+
+### Bloque para WhatsApp
 
 ```yaml
-DAILY_SUMMARY_TO_DISCORD: "false"
-DAILY_SUMMARY_TO_EMAIL: "true"
+FORWARD_BLOCK_ENABLED: "true"
+SHORTEN_URLS_FOR_FORWARD: "true"
 ```
 
-## 6. Bloque corto para WhatsApp
-
-El correo completo agrega un bloque asi:
+El correo completo incluye un bloque corto para reenviar:
 
 ```txt
 📲 Texto corto para reenviar:
 
-🚨 Actualizacion sismo Venezuela - 25/06 09:07 ART
+🚨 Actualizacion sismo Venezuela - 25/06 09:07 VET
 - Prioridad: 🟡 Media
-- M4.6 - Venezuela / zona cercana - 25/06 08:55 ART
+- M4.6 - Venezuela / zona cercana - 25/06 08:55 VET
   Fuente: https://is.gd/xxxxx
 - Titulo de noticia relevante (Medio)
   Fuente: https://is.gd/yyyyy
 - Verificar fuentes oficiales antes de compartir.
 ```
 
-Para desactivarlo:
+## Ejecucion manual
 
-```yaml
-FORWARD_BLOCK_ENABLED: "false"
+Desde GitHub:
+
+1. Entra al repositorio.
+2. Abre `Actions`.
+3. Selecciona `Monitor Sismo Venezuela`.
+4. Presiona `Run workflow`.
+
+Opciones disponibles:
+
+```txt
+force_send
+send_daily_summary
 ```
 
-## 7. Probar manualmente
+`force_send` reenvia lo detectado aunque ya este marcado como visto.
 
-En GitHub:
+`send_daily_summary` fuerza el resumen diario en ese momento.
 
-1. Repo -> Actions.
-2. Monitor Sismo Venezuela.
-3. Run workflow.
-4. Opcional: activa `force_send` para reenviar novedades aunque ya esten vistas.
-5. Opcional: activa `send_daily_summary` para probar el resumen diario en ese momento.
+## Probar localmente
 
-## 8. Comportamiento esperado
+Instala dependencias:
 
-Si hay novedades:
-
-- Discord recibe una alerta compacta con enlaces.
-- Correo recibe el detalle completo.
-- El correo incluye un texto corto listo para WhatsApp.
-- Se actualiza `state/state.json`.
-
-Una vez al dia:
-
-- Envia resumen diario aunque no haya novedades urgentes.
-- Si no hubo novedades en 24 h, avisa que el monitoreo sigue activo.
-
-Si no hay novedades y aun no toca resumen diario:
-
-- No envia nada por defecto.
-
-Para enviar tambien cuando no hay novedades cada hora, cambia:
-
-```yaml
-SEND_EMPTY_DIGEST: "true"
+```bash
+python -m pip install -r requirements.txt
 ```
 
-## 9. Ajustes utiles
+Ejecuta sin enviar nada real:
 
-```yaml
-LOOKBACK_HOURS: "24"
-MIN_MAGNITUDE: "2.5"
-MAX_NEWS: "8"
-MAX_QUAKES: "8"
-EMAIL_STRICT: "false"
-DISCORD_STRICT: "false"
+```bash
+DRY_RUN=true \
+SEND_DISCORD=true \
+SEND_EMAIL=false \
+DISCORD_WEBHOOK_URL=https://discord.invalid/webhook \
+STATE_FILE=state/local-test-state.json \
+python src/sismo_monitor.py
 ```
 
-- `EMAIL_STRICT: "false"`: si el correo falla pero Discord funciona, el workflow no se rompe.
-- `DISCORD_STRICT: "false"`: si Discord falla pero el correo funciona, el workflow no se rompe.
-- Si ambos canales fallan al enviar una alerta, el workflow falla y no marca las novedades como enviadas.
+En PowerShell:
+
+```powershell
+$env:DRY_RUN = "true"
+$env:SEND_DISCORD = "true"
+$env:SEND_EMAIL = "false"
+$env:DISCORD_WEBHOOK_URL = "https://discord.invalid/webhook"
+$env:STATE_FILE = "state/local-test-state.json"
+$env:PYTHONIOENCODING = "utf-8"
+python src\sismo_monitor.py
+```
+
+`DRY_RUN=true` imprime el preview en consola y no envia Discord ni correo.
+
+## Estado persistente
+
+El archivo `state/state.json` guarda:
+
+```txt
+seen_ids
+seen_signatures
+url_cache
+last_sent_at
+last_sent_count
+last_sent_digest_fingerprint
+last_daily_summary_date
+last_daily_summary_digest_fingerprint
+```
+
+El workflow commitea ese archivo al final de cada ejecucion si hubo cambios:
+
+```yaml
+permissions:
+  contents: write
+```
+
+Si el repositorio no permite a GitHub Actions escribir contenido, el monitor podra enviar mensajes pero no podra guardar estado correctamente.
+
+## Personalizar para otro pais o region
+
+Cambia estas variables:
+
+```yaml
+DIGEST_TZ: America/Caracas
+DIGEST_TZ_LABEL: VET
+MIN_LAT: "0.0"
+MAX_LAT: "13.8"
+MIN_LON: "-74.8"
+MAX_LON: "-58.8"
+NEWS_RSS_URLS: "..."
+```
+
+Tambien conviene ajustar las consultas por defecto en `DEFAULT_NEWS_QUERIES` dentro de `src/sismo_monitor.py`.
 
 ## Seguridad
 
-No pegues webhooks, passwords SMTP ni app passwords en archivos del repo. Guardalos solo como GitHub Secrets.
+- No pegues webhooks ni passwords en archivos del repositorio.
+- Usa siempre GitHub Actions Secrets.
+- Si usas Gmail, crea una app password.
+- No publiques `state/state.json` si contiene informacion que no quieres compartir.
+- Revisa manualmente fuentes oficiales antes de reenviar mensajes sensibles.
 
-Esto no reemplaza fuentes oficiales ni servicios de emergencia. Es un digest automatico para monitoreo y reenvio con criterio.
+## Limitaciones
+
+- Google News RSS puede cambiar resultados, ordenar distinto o entregar enlaces agregados.
+- Algunos medios republican notas muy parecidas; la deduplicacion reduce ruido, pero no es perfecta.
+- USGS puede actualizar magnitud, profundidad o ubicacion despues del primer reporte.
+- El monitor informa novedades; no valida danos ni cifras humanas como una fuente oficial.
+

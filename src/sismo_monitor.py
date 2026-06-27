@@ -18,6 +18,7 @@ import sys
 import unicodedata
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
+from difflib import SequenceMatcher
 from email.message import EmailMessage
 from email.utils import formatdate
 from pathlib import Path
@@ -29,7 +30,8 @@ import feedparser
 import requests
 
 STATE_FILE = Path(os.getenv("STATE_FILE", "state/state.json"))
-DIGEST_TZ = ZoneInfo(os.getenv("DIGEST_TZ", "America/Argentina/Buenos_Aires"))
+DIGEST_TZ = ZoneInfo(os.getenv("DIGEST_TZ", "America/Caracas"))
+DIGEST_TZ_LABEL = os.getenv("DIGEST_TZ_LABEL", "VET")
 LOOKBACK_HOURS = int(os.getenv("LOOKBACK_HOURS", "24"))
 MIN_MAGNITUDE = float(os.getenv("MIN_MAGNITUDE", "2.5"))
 MAX_NEWS = int(os.getenv("MAX_NEWS", "8"))
@@ -37,6 +39,7 @@ MAX_QUAKES = int(os.getenv("MAX_QUAKES", "8"))
 SEND_EMPTY_DIGEST = os.getenv("SEND_EMPTY_DIGEST", "false").lower() == "true"
 FORCE_SEND = os.getenv("FORCE_SEND", "false").lower() == "true"
 DRY_RUN = os.getenv("DRY_RUN", "false").lower() == "true"
+NOTIFY_ONLY_ON_CHANGE = os.getenv("NOTIFY_ONLY_ON_CHANGE", "true").lower() == "true"
 
 # Notification controls. "auto" means: enabled only when required secrets exist.
 SEND_DISCORD_SETTING = os.getenv("SEND_DISCORD", "auto").lower()
@@ -52,6 +55,9 @@ SHORTEN_URLS_FOR_FORWARD = os.getenv("SHORTEN_URLS_FOR_FORWARD", "true").lower()
 URL_SHORTENER = os.getenv("URL_SHORTENER", "isgd").strip().lower()
 URL_SHORTENER_TIMEOUT = int(os.getenv("URL_SHORTENER_TIMEOUT", "8"))
 URL_CACHE_MAX_ENTRIES = int(os.getenv("URL_CACHE_MAX_ENTRIES", "500"))
+NEWS_FEED_TIMEOUT = int(os.getenv("NEWS_FEED_TIMEOUT", "30"))
+MAX_SEEN_SIGNATURES = int(os.getenv("MAX_SEEN_SIGNATURES", "1500"))
+NEWS_SOURCE_BLOCKLIST = os.getenv("NEWS_SOURCE_BLOCKLIST", r"\b(vietnam\.vn)\b")
 
 # Daily status summary controls.
 DAILY_SUMMARY_ENABLED = os.getenv("DAILY_SUMMARY_ENABLED", "true").lower() == "true"
@@ -86,7 +92,7 @@ EMOJI_LINK = "\U0001F517"
 EMOJI_CHECK = "\u2705"
 
 RELEVANCE_RE = re.compile(
-    r"\b(venezuela|venezolano|venezolana|caracas|la guaira|yaracuy|falcon|lara|carabobo|miranda|aragua|funvisis)\b",
+    r"\b(venezuela|venezolano|venezolana|caracas|la guaira|vargas|yaracuy|falcon|falc[oó]n|lara|carabobo|miranda|aragua|sucre|zulia|yumare|san felipe|mor[oó]n|guatire|maracay|funvisis|protecci[oó]n civil)\b",
     re.IGNORECASE,
 )
 SEISMIC_RE = re.compile(
@@ -97,12 +103,75 @@ URGENT_RE = re.compile(
     r"\b(muerto|muertos|fallecido|fallecidos|herido|heridos|colapso|derrumb|danos|emergencia|alerta|aeropuerto|refugio|evacuad|desaparecid|victima|victimas)\b",
     re.IGNORECASE,
 )
+SOURCE_BLOCK_RE = re.compile(NEWS_SOURCE_BLOCKLIST, re.IGNORECASE) if NEWS_SOURCE_BLOCKLIST else None
+TRUSTED_SOURCE_RE = re.compile(
+    r"\b(funvisis|protecci[oó]n civil|reliefweb|gdacs|reuters|associated press|ap news|bbc|efecto cocuyo|el pitazo|cr[oó]nica uno|runrun|monitoreamos|tal cual|radio fe y alegr[ií]a|el diario|globovisi[oó]n|el impulso|diario versi[oó]n final|primera edici[oó]n)\b",
+    re.IGNORECASE,
+)
 
 DEFAULT_NEWS_QUERIES = [
     "(sismo OR terremoto OR temblor OR replicas OR replica) Venezuela when:1d",
     "FUNVISIS sismo Venezuela when:1d",
     "Proteccion Civil Venezuela sismo when:1d",
+    "Venezuela earthquake aftershock official when:3d",
+    "site:reliefweb.int Venezuela earthquake when:7d",
+    "site:gdacs.org Venezuela earthquake when:7d",
+    "site:reuters.com Venezuela earthquake when:7d",
+    "site:apnews.com Venezuela earthquake when:7d",
+    "site:bbc.com/mundo sismo Venezuela when:7d",
+    "site:efectococuyo.com sismo Venezuela when:3d",
+    "site:elpitazo.net sismo Venezuela when:3d",
+    "site:cronica.uno sismo Venezuela when:3d",
+    "site:runrun.es sismo Venezuela when:3d",
+    "site:monitoreamos.com sismo Venezuela when:3d",
+    "site:talcualdigital.com sismo Venezuela when:3d",
+    "site:radiofeyalegrianoticias.com sismo Venezuela when:3d",
 ]
+
+NEWS_STOPWORDS = {
+    "actualizacion",
+    "actualizaciones",
+    "afectados",
+    "ante",
+    "cerca",
+    "como",
+    "confirma",
+    "contra",
+    "desde",
+    "despues",
+    "dice",
+    "durante",
+    "earthquake",
+    "este",
+    "esta",
+    "estos",
+    "estas",
+    "fuerte",
+    "hace",
+    "informa",
+    "informo",
+    "informed",
+    "junto",
+    "luego",
+    "magnitud",
+    "para",
+    "pero",
+    "por",
+    "que",
+    "reporta",
+    "reporte",
+    "reporto",
+    "reports",
+    "segun",
+    "sismo",
+    "sismos",
+    "sobre",
+    "temblor",
+    "terremoto",
+    "tras",
+    "ultimas",
+    "venezuela",
+}
 
 
 @dataclass(frozen=True)
@@ -149,26 +218,35 @@ def make_id(prefix: str, *parts: str) -> str:
     return f"{prefix}:{hashlib.sha1(raw.encode('utf-8')).hexdigest()[:16]}"
 
 
+def stable_hash(prefix: str, value: str) -> str:
+    return f"{prefix}:{hashlib.sha1(value.encode('utf-8')).hexdigest()[:16]}"
+
+
 def is_http_url(value: str) -> bool:
     return value.startswith("http://") or value.startswith("https://")
 
 
+def default_state() -> dict:
+    return {"seen_ids": [], "seen_signatures": [], "url_cache": {}}
+
+
 def load_state(path: Path = STATE_FILE) -> dict:
     if not path.exists():
-        return {"seen_ids": [], "url_cache": {}}
+        return default_state()
     try:
         with path.open("r", encoding="utf-8") as f:
             data = json.load(f)
         if not isinstance(data, dict):
-            return {"seen_ids": [], "url_cache": {}}
+            return default_state()
         data.setdefault("seen_ids", [])
+        data.setdefault("seen_signatures", [])
         data.setdefault("url_cache", {})
         if not isinstance(data.get("url_cache"), dict):
             data["url_cache"] = {}
         return data
     except Exception as exc:  # noqa: BLE001
         print(f"Warning: could not read state file: {exc}", file=sys.stderr)
-        return {"seen_ids": [], "url_cache": {}}
+        return default_state()
 
 
 def trim_url_cache(cache: dict[str, str]) -> dict[str, str]:
@@ -178,9 +256,15 @@ def trim_url_cache(cache: dict[str, str]) -> dict[str, str]:
     return dict(items)
 
 
+def trim_seen_signatures(signatures: Iterable[str]) -> list[str]:
+    unique = list(dict.fromkeys(sig for sig in signatures if sig))
+    return unique[:MAX_SEEN_SIGNATURES]
+
+
 def save_state(state: dict, path: Path = STATE_FILE) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     state["url_cache"] = trim_url_cache(dict(state.get("url_cache", {})))
+    state["seen_signatures"] = trim_seen_signatures(state.get("seen_signatures", []))
     tmp = path.with_suffix(".tmp")
     with tmp.open("w", encoding="utf-8") as f:
         json.dump(state, f, ensure_ascii=False, indent=2, sort_keys=True)
@@ -230,13 +314,68 @@ def strip_source_suffix(title: str, source: str) -> str:
     return title
 
 
+def fetch_feed(url: str):  # noqa: ANN201
+    response = requests.get(url, headers={"User-Agent": USER_AGENT}, timeout=NEWS_FEED_TIMEOUT)
+    response.raise_for_status()
+    return feedparser.parse(response.content)
+
+
+def news_fingerprint_text(title: str, summary: str = "") -> str:
+    text = normalize_for_id(f"{title} {summary}")
+    text = re.sub(r"\b\d{1,2}(jun|jul|ago|sep|oct|nov|dic|ene|feb|mar|abr|may)\b", " ", text)
+    text = re.sub(r"\b\d{1,2}\b", " ", text)
+    tokens = [
+        token
+        for token in text.split()
+        if len(token) >= 4 and token not in NEWS_STOPWORDS and not token.startswith("http")
+    ]
+    if not tokens:
+        return normalize_for_id(title)
+    return " ".join(tokens[:18])
+
+
+def news_items_are_similar(left: str, right: str) -> bool:
+    if not left or not right:
+        return False
+    if left == right:
+        return True
+    left_tokens = set(left.split())
+    right_tokens = set(right.split())
+    if left_tokens and right_tokens:
+        overlap = len(left_tokens & right_tokens) / max(1, min(len(left_tokens), len(right_tokens)))
+        if overlap >= 0.78:
+            return True
+    return SequenceMatcher(None, left, right).ratio() >= 0.88
+
+
+def news_source_score(source: str) -> int:
+    if TRUSTED_SOURCE_RE.search(fold_accents(source)):
+        return 2
+    return 1
+
+
+def item_signature(item: Item) -> str:
+    if item.kind == "quake":
+        return item.item_id
+    return stable_hash("news-sig", news_fingerprint_text(item.title))
+
+
+def digest_fingerprint(items: list[Item]) -> str:
+    signatures = sorted(item_signature(item) for item in items)
+    return stable_hash("digest", "|".join(signatures))
+
+
 def fetch_news() -> list[Item]:
     cutoff = now_utc() - timedelta(hours=LOOKBACK_HOURS)
     items: list[Item] = []
-    seen_titles: set[str] = set()
+    seen_fingerprints: list[str] = []
 
     for url in configured_news_urls():
-        parsed = feedparser.parse(url, request_headers={"User-Agent": USER_AGENT})
+        try:
+            parsed = fetch_feed(url)
+        except Exception as exc:  # noqa: BLE001
+            print(f"Warning: could not fetch news feed {url}: {exc}", file=sys.stderr)
+            continue
         if getattr(parsed, "bozo", False):
             print(
                 f"Warning: feed parser issue for {url}: {getattr(parsed, 'bozo_exception', '')}",
@@ -253,6 +392,8 @@ def fetch_news() -> list[Item]:
 
             if not title or not link:
                 continue
+            if SOURCE_BLOCK_RE and SOURCE_BLOCK_RE.search(source):
+                continue
             if published_at and published_at < cutoff:
                 continue
 
@@ -260,14 +401,14 @@ def fetch_news() -> list[Item]:
             if not (RELEVANCE_RE.search(haystack) and SEISMIC_RE.search(haystack)):
                 continue
 
-            norm_title = normalize_for_id(title)
-            if norm_title in seen_titles:
+            fingerprint = news_fingerprint_text(title)
+            if any(news_items_are_similar(fingerprint, seen) for seen in seen_fingerprints):
                 continue
-            seen_titles.add(norm_title)
+            seen_fingerprints.append(fingerprint)
 
             items.append(
                 Item(
-                    item_id=make_id("news", title, source),
+                    item_id=stable_hash("news", fingerprint),
                     kind="news",
                     title=title,
                     source=source or "Medio",
@@ -277,7 +418,13 @@ def fetch_news() -> list[Item]:
                 )
             )
 
-    items.sort(key=lambda item: item.published_at or datetime.min.replace(tzinfo=timezone.utc), reverse=True)
+    items.sort(
+        key=lambda item: (
+            news_source_score(item.source),
+            item.published_at or datetime.min.replace(tzinfo=timezone.utc),
+        ),
+        reverse=True,
+    )
     return items[:MAX_NEWS]
 
 
@@ -446,7 +593,7 @@ def quake_line(
 ) -> list[str]:
     depth = f" - profundidad {item.depth_km:.1f} km" if item.depth_km is not None else ""
     mag = f"M{item.mag:.1f}" if item.mag is not None else "Magnitud no informada"
-    lines = [f"- {mag} - {item.place} - {local_time(item.published_at)} ART{depth}"]
+    lines = [f"- {mag} - {item.place} - {local_time(item.published_at)} {DIGEST_TZ_LABEL}{depth}"]
     link = get_item_url(item, link_map)
     if with_url and link:
         lines.append(f"  Fuente USGS: <{link}>")
@@ -467,7 +614,7 @@ def build_forward_block(
     lines: list[str] = [
         f"{EMOJI_PHONE} {title}:",
         "",
-        f"{EMOJI_ALERT} Actualizacion sismo Venezuela - {local_now_label(include_year=False)} ART",
+        f"{EMOJI_ALERT} Actualizacion sismo Venezuela - {local_now_label(include_year=False)} {DIGEST_TZ_LABEL}",
         f"- Prioridad: {priority_icon} {priority_text}",
     ]
 
@@ -480,7 +627,7 @@ def build_forward_block(
             link = get_item_url(item, link_map)
             if item.kind == "quake":
                 mag = f"M{item.mag:.1f}" if item.mag is not None else "sismo"
-                line = f"- {mag} - {truncate(item.place, 85)} - {local_time(item.published_at)} ART"
+                line = f"- {mag} - {truncate(item.place, 85)} - {local_time(item.published_at)} {DIGEST_TZ_LABEL}"
             else:
                 line = f"- {truncate(item.title, 110)} ({item.source or 'Medio'})"
             lines.append(line)
@@ -507,7 +654,7 @@ def build_full_message(
     news = [item for item in new_items if item.kind == "news"]
 
     lines: list[str] = [
-        f"{EMOJI_ALERT} Actualizacion sismo Venezuela - {local_now_label()} ART",
+        f"{EMOJI_ALERT} Actualizacion sismo Venezuela - {local_now_label()} {DIGEST_TZ_LABEL}",
         "",
         "Resumen por puntos:",
         f"- Prioridad: {priority_icon} {priority_text}",
@@ -551,7 +698,7 @@ def build_compact_discord_message(
     news = [item for item in new_items if item.kind == "news"]
 
     lines: list[str] = [
-        f"{EMOJI_ALERT} Actualizacion sismo Venezuela - {local_now_label()} ART",
+        f"{EMOJI_ALERT} Actualizacion sismo Venezuela - {local_now_label()} {DIGEST_TZ_LABEL}",
         f"- Prioridad: {priority_icon} {priority_text}",
         f"- Novedades: {len(new_items)} ({len(quakes)} sismos / {len(news)} noticias)",
     ]
@@ -587,7 +734,7 @@ def build_compact_discord_message(
 
 def build_empty_message() -> str:
     return (
-        f"{EMOJI_GREEN} Actualizacion sismo Venezuela - {local_now_label()} ART\n\n"
+        f"{EMOJI_GREEN} Actualizacion sismo Venezuela - {local_now_label()} {DIGEST_TZ_LABEL}\n\n"
         "- Sin novedades nuevas detectadas en las fuentes monitoreadas.\n"
         "- Se mantiene el seguimiento automatico cada hora."
     )
@@ -621,18 +768,18 @@ def build_daily_summary_message(
     latest = newest_item(items_24h)
 
     lines: list[str] = [
-        f"{EMOJI_PIN} Resumen diario - Sismo Venezuela - {local_now_label()} ART",
+        f"{EMOJI_PIN} Resumen diario - Sismo Venezuela - {local_now_label()} {DIGEST_TZ_LABEL}",
         "",
         "Ultimas 24 h:",
         f"- Estado: {priority_icon} {priority_text}",
         f"- Eventos sismicos detectados: {len(quakes)}",
         f"- Mayor magnitud registrada: {max_magnitude_label(quakes)}",
         f"- Noticias relevantes detectadas: {len(news)}",
-        "- Fuentes revisadas: USGS + RSS de noticias configurados",
+        "- Fuentes revisadas: USGS + RSS/Google News configurados",
     ]
 
     if latest:
-        lines.append(f"- Ultima novedad detectada: {truncate(latest.title, 140)} - {local_time(latest.published_at)} ART")
+        lines.append(f"- Ultima novedad detectada: {truncate(latest.title, 140)} - {local_time(latest.published_at)} {DIGEST_TZ_LABEL}")
     else:
         lines.append("- Ultima novedad detectada: sin novedades relevantes en las fuentes monitoreadas.")
 
@@ -689,7 +836,7 @@ def build_daily_summary_discord(
     latest = newest_item(items_24h)
 
     lines: list[str] = [
-        f"{EMOJI_PIN} Resumen diario sismo Venezuela - {local_now_label()} ART",
+        f"{EMOJI_PIN} Resumen diario sismo Venezuela - {local_now_label()} {DIGEST_TZ_LABEL}",
         f"- Estado: {priority_icon} {priority_text}",
         f"- Sismos 24 h: {len(quakes)} | Mayor magnitud: {max_magnitude_label(quakes)}",
         f"- Noticias 24 h: {len(news)}",
@@ -730,13 +877,13 @@ def build_daily_summary_discord(
 
 def build_subject(new_items: list[Item]) -> str:
     if not new_items:
-        return f"Sismo Venezuela - sin novedades - {local_now_label(include_year=False)} ART"
+        return f"Sismo Venezuela - sin novedades - {local_now_label(include_year=False)} {DIGEST_TZ_LABEL}"
     _, priority_text = detect_priority(new_items)
     quakes = [item for item in new_items if item.kind == "quake"]
     news = [item for item in new_items if item.kind == "news"]
     return (
         f"Sismo Venezuela - {priority_text} - {len(new_items)} novedades "
-        f"({len(quakes)} sismos / {len(news)} noticias) - {local_now_label(include_year=False)} ART"
+        f"({len(quakes)} sismos / {len(news)} noticias) - {local_now_label(include_year=False)} {DIGEST_TZ_LABEL}"
     )
 
 
@@ -745,10 +892,10 @@ def build_daily_subject(items_24h: list[Item]) -> str:
     news = [item for item in items_24h if item.kind == "news"]
     _, priority_text = detect_priority(items_24h)
     if not items_24h:
-        return f"Resumen diario - Sismo Venezuela - sin novedades - {local_now_label(include_year=False)} ART"
+        return f"Resumen diario - Sismo Venezuela - sin novedades - {local_now_label(include_year=False)} {DIGEST_TZ_LABEL}"
     return (
         f"Resumen diario - Sismo Venezuela - {priority_text} - "
-        f"{len(quakes)} sismos / {len(news)} noticias - {local_now_label(include_year=False)} ART"
+        f"{len(quakes)} sismos / {len(news)} noticias - {local_now_label(include_year=False)} {DIGEST_TZ_LABEL}"
     )
 
 
@@ -960,11 +1107,37 @@ def should_send_daily_summary(state: dict) -> bool:
 def deduplicate_items(items: list[Item]) -> list[Item]:
     unique: list[Item] = []
     local_ids: set[str] = set()
+    local_signatures: set[str] = set()
+    local_news_fingerprints: list[str] = []
     for item in items:
-        if item.item_id not in local_ids:
-            unique.append(item)
-            local_ids.add(item.item_id)
+        signature = item_signature(item)
+        if item.item_id in local_ids:
+            continue
+        if item.kind == "news":
+            fingerprint = news_fingerprint_text(item.title)
+            if any(news_items_are_similar(fingerprint, seen) for seen in local_news_fingerprints):
+                continue
+            local_news_fingerprints.append(fingerprint)
+        if signature in local_signatures:
+            continue
+        unique.append(item)
+        local_ids.add(item.item_id)
+        local_signatures.add(signature)
     return unique
+
+
+def unseen_items(items: list[Item], seen_ids: set[str], seen_signatures: set[str]) -> list[Item]:
+    return [
+        item
+        for item in items
+        if item.item_id not in seen_ids and item_signature(item) not in seen_signatures
+    ]
+
+
+def digest_changed(state: dict, fingerprint: str, *, state_key: str = "last_sent_digest_fingerprint") -> bool:
+    if FORCE_SEND or not NOTIFY_ONLY_ON_CHANGE:
+        return True
+    return state.get(state_key) != fingerprint
 
 
 def make_link_maps(items: list[Item], url_cache: dict[str, str]) -> tuple[dict[str, str], dict[str, str], dict[str, str]]:
@@ -978,6 +1151,8 @@ def main() -> int:
     state = load_state()
     seen_ids = list(dict.fromkeys(state.get("seen_ids", [])))
     seen_set = set(seen_ids)
+    seen_signatures = trim_seen_signatures(state.get("seen_signatures", []))
+    seen_signature_set = set(seen_signatures)
     url_cache: dict[str, str] = dict(state.get("url_cache", {}))
 
     errors: list[str] = []
@@ -994,7 +1169,12 @@ def main() -> int:
         errors.append(f"News RSS: {exc}")
 
     unique = deduplicate_items(items)
-    new_items = unique if FORCE_SEND else [item for item in unique if item.item_id not in seen_set]
+    current_digest_fingerprint = digest_fingerprint(unique)
+    new_items = unique if FORCE_SEND else unseen_items(unique, seen_set, seen_signature_set)
+
+    if new_items and not digest_changed(state, current_digest_fingerprint):
+        print("Detected items match the last sent digest; skipping notification.")
+        new_items = []
 
     if errors:
         print("Warnings while fetching sources:", file=sys.stderr)
@@ -1020,17 +1200,40 @@ def main() -> int:
         # Only update seen state after at least one successful notification channel.
         new_seen = [item.item_id for item in new_items] + seen_ids
         state["seen_ids"] = list(dict.fromkeys(new_seen))[:1000]
+        state["seen_signatures"] = trim_seen_signatures(
+            [item_signature(item) for item in new_items] + seen_signatures
+        )
         state["last_sent_at"] = now_utc().isoformat(timespec="seconds")
         state["last_sent_count"] = len(new_items)
+        state["last_sent_digest_fingerprint"] = current_digest_fingerprint
         state_changed = True
         print(f"Sent digest with {len(new_items)} new items.")
     else:
         print("No new items detected.")
-        if SEND_EMPTY_DIGEST:
+        if SEND_EMPTY_DIGEST and digest_changed(state, current_digest_fingerprint):
             full_message = build_empty_message()
             send_notifications(full_message, full_message, build_subject([]))
+            state["last_sent_at"] = now_utc().isoformat(timespec="seconds")
+            state["last_sent_count"] = 0
+            state["last_sent_digest_fingerprint"] = current_digest_fingerprint
+            state_changed = True
+        elif SEND_EMPTY_DIGEST:
+            print("Empty digest skipped because monitored content has not changed.")
 
     if should_send_daily_summary(state):
+        if not digest_changed(
+            state,
+            current_digest_fingerprint,
+            state_key="last_daily_summary_digest_fingerprint",
+        ):
+            print("Daily summary skipped because monitored content has not changed.")
+            state["last_daily_summary_date"] = local_today_key()
+            state["last_daily_summary_skipped_at"] = now_utc().isoformat(timespec="seconds")
+            state_changed = True
+            state["url_cache"] = trim_url_cache(url_cache)
+            save_state(state)
+            return 0
+
         full_links, discord_links, forward_links = make_link_maps(unique, url_cache)
         daily_full = build_daily_summary_message(
             unique,
@@ -1055,6 +1258,7 @@ def main() -> int:
             state["last_daily_summary_date"] = local_today_key()
             state["last_daily_summary_at"] = now_utc().isoformat(timespec="seconds")
             state["last_daily_summary_count"] = len(unique)
+            state["last_daily_summary_digest_fingerprint"] = current_digest_fingerprint
             state_changed = True
             print(f"Sent daily summary with {len(unique)} items from the last {LOOKBACK_HOURS} h.")
         except Exception as exc:  # noqa: BLE001

@@ -81,11 +81,15 @@ jobs:
           EMAIL_STRICT: "false"
 
           # Monitor config
-          DIGEST_TZ: America/Argentina/Buenos_Aires
-          LOOKBACK_HOURS: "24"
+          DIGEST_TZ: America/Caracas
+          DIGEST_TZ_LABEL: VET
+          LOOKBACK_HOURS: "72"
           MIN_MAGNITUDE: "2.5"
-          MAX_NEWS: "8"
+          MAX_NEWS: "12"
           MAX_QUAKES: "8"
+          NEWS_FEED_TIMEOUT: "30"
+          NEWS_SOURCE_BLOCKLIST: "\\b(vietnam\\.vn)\\b"
+          NOTIFY_ONLY_ON_CHANGE: "true"
           SEND_EMPTY_DIGEST: "false"
           FORCE_SEND: ${{ github.event_name == 'workflow_dispatch' && inputs.force_send || false }}
         run: python src/sismo_monitor.py
