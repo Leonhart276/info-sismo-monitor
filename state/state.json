@@ -3,10 +3,11 @@
   "last_daily_summary_count": 18,
   "last_daily_summary_date": "2026-06-27",
   "last_daily_summary_digest_fingerprint": "digest:568b493325157b01",
-  "last_sent_at": "2026-06-28T05:43:59+00:00",
-  "last_sent_count": 3,
-  "last_sent_digest_fingerprint": "digest:85865b1a2331c914",
+  "last_sent_at": "2026-06-28T09:29:57+00:00",
+  "last_sent_count": 1,
+  "last_sent_digest_fingerprint": "digest:c433ea2313e51cde",
   "seen_ids": [
+    "quake:us6000t8su",
     "news:474bf6aa22645632",
     "news:c5e9649389a9c9f0",
     "news:e2416c0504561a60",
@@ -151,6 +152,7 @@
     "news:a4faa02053a81dc1"
   ],
   "seen_signatures": [
+    "quake:us6000t8su",
     "news-sig:474bf6aa22645632",
     "news-sig:c5e9649389a9c9f0",
     "news-sig:e2416c0504561a60",
@@ -211,6 +213,7 @@
     "https://earthquake.usgs.gov/earthquakes/eventpage/us6000t8d1": "https://is.gd/eJo633",
     "https://earthquake.usgs.gov/earthquakes/eventpage/us6000t8k6": "https://is.gd/RiRHJO",
     "https://earthquake.usgs.gov/earthquakes/eventpage/us6000t8q8": "https://is.gd/zT0h8o",
+    "https://earthquake.usgs.gov/earthquakes/eventpage/us6000t8su": "https://earthquake.usgs.gov/earthquakes/eventpage/us6000t8su",
     "https://news.google.com/rss/articles/CBMi-AFBVV95cUxNNHpiVERwRXQxcFNWSjNKUF8wYUNPR3Fkakw0ZGppYVVMM3J4Q3BBeFlCUldKZ1NDVDl0MmFrVGlMMlVfVXhUdXBDZ2R2ZVBEVTE2UncxeGE2UENtdE4wV2p5c1k4S2xORmJXZE55TXJUVWhubzRESXhMMDZkcWZRazVNTUFfVVJwZENlbGdXbURUYjdFTFhyUVlwWllOSDVWc1B3Sm9iazRoWnpTYU9EWmNTSWJTVEYyX1BsOVRWY3dOOVNNeEsxTFJIWnBqMkJrV3ZnZFZtTmctYTRIM1lMQnZFUTk0WmJPYXBEM0ZYR3RxTm5Xb1lEMNIBjAJBVV95cUxPaUdUMkoxdmZKdWNHNk8tY3VYcThSMURVYXJocHlpb0o3dEFrdEVEZlNNZ3djU3A2REZ6eU5uNmV4S3ZibTBaT1N2UjZUWl92SDk0ZXBTLU1pbmt0SER0bW4wT1lyZmdJbFJjbmVBNFc1Q1BjRllheVo1VDQ0SVIzcGl4ZHZLLXg3d002azFMSm1aeWlzODk3d1VITldCTklUZzdaMEN4MlB5N0NuR3hxUC1zeWtuakFtVXdfWG1zT1BhR1RZNm5uSHJCVk9YYTBiZnF2a2RSRGpRTUNmdmJQY1lDY2VKcmtMbXlKZUhMN2tNNWVNT3U0SC1QUHBMbFdaa0hFWVdFNWhrSXF6?oc=5": "https://is.gd/i3PrRr",
     "https://news.google.com/rss/articles/CBMi0gFBVV95cUxOdGd1ODBxYWpDdlBvMnlxVkhDZHJveXZla3BfdGN6SXVnSE9YMFZwMHBiN2U4aUJ5bHVETDE5VjI1Mk9VRVNaM3RCSVc3VTNpakZraWhmdmpsUmpFZ0JacmJ0M3QtaTU1c0lybWlHOTdFd0tRSWRKT0drb1Fua1VJa1hjaGNIZThmQklxQVBYSXVlaDJ4VTJaejA0Vk1uc2hYX3BOU3JJMFQydGVJdFhlMExLNHpTWURTdGJpZmRQZm9KS0I4NlFlTUJsVFVBb1B6Tnc?oc=5": "https://is.gd/U5ALrV",
     "https://news.google.com/rss/articles/CBMi1AFBVV95cUxOb3F1bUxuYlBtcllFTHpNeGtybTNXc3p3b1VBUnZ1SmtJblhhMUo5aDB6QmM0Q0JyYWh0Zm12YU9OMVFCTGpkMy16VUN3M3RnTDJsNW42eVFlS3dRVHBNOUQxeW1IMUdOaFRiSnN5UUdSNW96OER4ay1jRXpXcUZDTHA3bVQzY2NZWUE1RzBRWE45MGRWUmhaTG9sYjlXS0pVRHZCUjJESG9JUHd3VFZGSGMtNW10OGVLNjU2V2cwS0ZWSTJGUW1OSW5zcjhnOGVrQ1Nqbg?oc=5": "https://is.gd/ghNRG1",
