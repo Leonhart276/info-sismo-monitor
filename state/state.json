@@ -3,10 +3,11 @@
   "last_daily_summary_count": 18,
   "last_daily_summary_date": "2026-06-27",
   "last_daily_summary_digest_fingerprint": "digest:568b493325157b01",
-  "last_sent_at": "2026-06-27T22:14:39+00:00",
-  "last_sent_count": 5,
-  "last_sent_digest_fingerprint": "digest:02dde86852dc8bbf",
+  "last_sent_at": "2026-06-28T00:13:12+00:00",
+  "last_sent_count": 1,
+  "last_sent_digest_fingerprint": "digest:3da3f4a177017a7e",
   "seen_ids": [
+    "news:5184e607cb592068",
     "news:65cef1486203cdc6",
     "news:120a95fadafda13c",
     "news:0dc9d507dd191bfd",
@@ -147,6 +148,7 @@
     "news:a4faa02053a81dc1"
   ],
   "seen_signatures": [
+    "news-sig:5184e607cb592068",
     "news-sig:65cef1486203cdc6",
     "news-sig:120a95fadafda13c",
     "news-sig:0dc9d507dd191bfd",
