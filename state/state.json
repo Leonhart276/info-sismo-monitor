@@ -3,10 +3,11 @@
   "last_daily_summary_count": 17,
   "last_daily_summary_date": "2026-06-29",
   "last_daily_summary_digest_fingerprint": "digest:76cd918a96e89e08",
-  "last_sent_at": "2026-06-30T09:58:29+00:00",
+  "last_sent_at": "2026-06-30T12:22:50+00:00",
   "last_sent_count": 1,
-  "last_sent_digest_fingerprint": "digest:5cb2f29873a66cdd",
+  "last_sent_digest_fingerprint": "digest:cbf58bcd65d7909c",
   "seen_ids": [
+    "news:ac24b5295365493d",
     "news:6d215ecae629f1dd",
     "news:a0e60a27efafe565",
     "news:33df5335f9e4be3e",
@@ -230,6 +231,7 @@
     "news:a4faa02053a81dc1"
   ],
   "seen_signatures": [
+    "news-sig:ac24b5295365493d",
     "news-sig:6d215ecae629f1dd",
     "news-sig:a0e60a27efafe565",
     "news-sig:33df5335f9e4be3e",
@@ -432,6 +434,7 @@
     "https://news.google.com/rss/articles/CBMiW0FVX3lxTE9GSTZNcV9CTTNFY2ZTSF9COU92eEQtc2lFdmgwNGxrQnlZXzJLOGZQNTNfazNVU2lteGRCMU5NMlQ0WXRrdzIzUkpjeHdNNXFmRC1zekxncXhlcHfSAWBBVV95cUxNS3R6YkMtODNJSzNDRTFBTjNlODUtYjVfdEIyOE1UZ29rdXk5VDZNd29PQV91NHVCUFJVaW13ZDNaSEFrb1cyS2c0Zmkyci1lcDc0YVc2cmpUZTF2MXE4bEI?oc=5": "https://news.google.com/rss/articles/CBMiW0FVX3lxTE9GSTZNcV9CTTNFY2ZTSF9COU92eEQtc2lFdmgwNGxrQnlZXzJLOGZQNTNfazNVU2lteGRCMU5NMlQ0WXRrdzIzUkpjeHdNNXFmRC1zekxncXhlcHfSAWBBVV95cUxNS3R6YkMtODNJSzNDRTFBTjNlODUtYjVfdEIyOE1UZ29rdXk5VDZNd29PQV91NHVCUFJVaW13ZDNaSEFrb1cyS2c0Zmkyci1lcDc0YVc2cmpUZTF2MXE4bEI?oc=5",
     "https://news.google.com/rss/articles/CBMiW0FVX3lxTE9WemZnTGsycmpHM0FKZ3h3cG5zX2wxaGlSSnl5ZjNRQUR4MzliWEt5dVhKOTN1cUZQd1hQNHZjekZReVdZczMtb0JyZl9iYzlOQjY2Zjc0eEttSHPSAWBBVV95cUxNT0ZOX3RfNWhuMzYwR0trbk94M2swUm9kS2ZpVlJ6aGZWSGtoOG9RNDNhX29SWTFHU0t1ODJaZHZVR1hidFpzVC0tQ29aNXNTTGYwa293bUlOV3hYWFRLSWc?oc=5": "https://news.google.com/rss/articles/CBMiW0FVX3lxTE9WemZnTGsycmpHM0FKZ3h3cG5zX2wxaGlSSnl5ZjNRQUR4MzliWEt5dVhKOTN1cUZQd1hQNHZjekZReVdZczMtb0JyZl9iYzlOQjY2Zjc0eEttSHPSAWBBVV95cUxNT0ZOX3RfNWhuMzYwR0trbk94M2swUm9kS2ZpVlJ6aGZWSGtoOG9RNDNhX29SWTFHU0t1ODJaZHZVR1hidFpzVC0tQ29aNXNTTGYwa293bUlOV3hYWFRLSWc?oc=5",
     "https://news.google.com/rss/articles/CBMiW0FVX3lxTE9xMmZwM2dQcXppSjJLRVM0bjFqV2ZVUUQtTjBRb0VRUnlmMmVjTWMtcEhQZV9VZVlnVTRKQy1KT0l5VmsxWXhRUjRCNE5DUmlKVDM4NmRpV0p4RknSAWBBVV95cUxPRTRwMTRxakIyb1B3OS02dU9JT3pvckFVUmtZTmQ2N3dLZDVrVFpyMGRFYVR4eG9BbVhvX2pDRjVyaFFPVHJNeUh3dlNQS2I4MXVzWlE1UmpCRjJrQVVoM0E?oc=5": "https://news.google.com/rss/articles/CBMiW0FVX3lxTE9xMmZwM2dQcXppSjJLRVM0bjFqV2ZVUUQtTjBRb0VRUnlmMmVjTWMtcEhQZV9VZVlnVTRKQy1KT0l5VmsxWXhRUjRCNE5DUmlKVDM4NmRpV0p4RknSAWBBVV95cUxPRTRwMTRxakIyb1B3OS02dU9JT3pvckFVUmtZTmQ2N3dLZDVrVFpyMGRFYVR4eG9BbVhvX2pDRjVyaFFPVHJNeUh3dlNQS2I4MXVzWlE1UmpCRjJrQVVoM0E?oc=5",
+    "https://news.google.com/rss/articles/CBMiYEFVX3lxTE1CaENnVzhOeS01VmtvLUk3Q08yY01tTmtrd1ppTlFyVGI4UThxV3MwUnYtdzFMc2FGZERsVXNlSmhCSFpJajIwVnBMU1ZXSUFrM0JKSjRXbEpvaE1odC1UbtIBYEFVX3lxTE1CaENnVzhOeS01VmtvLUk3Q08yY01tTmtrd1ppTlFyVGI4UThxV3MwUnYtdzFMc2FGZERsVXNlSmhCSFpJajIwVnBMU1ZXSUFrM0JKSjRXbEpvaE1odC1Ubg?oc=5": "https://news.google.com/rss/articles/CBMiYEFVX3lxTE1CaENnVzhOeS01VmtvLUk3Q08yY01tTmtrd1ppTlFyVGI4UThxV3MwUnYtdzFMc2FGZERsVXNlSmhCSFpJajIwVnBMU1ZXSUFrM0JKSjRXbEpvaE1odC1UbtIBYEFVX3lxTE1CaENnVzhOeS01VmtvLUk3Q08yY01tTmtrd1ppTlFyVGI4UThxV3MwUnYtdzFMc2FGZERsVXNlSmhCSFpJajIwVnBMU1ZXSUFrM0JKSjRXbEpvaE1odC1Ubg?oc=5",
     "https://news.google.com/rss/articles/CBMiYEFVX3lxTE1fQ0pGb0xkQnY0QTMxWmxlak82UDdCeTVCbHh5Y05qUzBHMW5CTWNaZG5pTkphNFNIRUpyVks4UWt6NXNjXzRLdURaX1FDRzdsdVBkcEFUQnNlSXJwVFRhU9IBYEFVX3lxTE1fQ0pGb0xkQnY0QTMxWmxlak82UDdCeTVCbHh5Y05qUzBHMW5CTWNaZG5pTkphNFNIRUpyVks4UWt6NXNjXzRLdURaX1FDRzdsdVBkcEFUQnNlSXJwVFRhUw?oc=5": "https://is.gd/HgwXX4",
     "https://news.google.com/rss/articles/CBMiYEFVX3lxTE90dG1LZVJCRk9FOHJfMk1nd2JTaTBOSFJTVkFrUzJSUHJHY0J5Q1BVNlBIekZ3WTVGVnFmcjNQa3hhWkxYZVJJTktzazNTOWE0anNJMkdvZ2Jva1FrTHpsNdIBYEFVX3lxTE90dG1LZVJCRk9FOHJfMk1nd2JTaTBOSFJTVkFrUzJSUHJHY0J5Q1BVNlBIekZ3WTVGVnFmcjNQa3hhWkxYZVJJTktzazNTOWE0anNJMkdvZ2Jva1FrTHpsNQ?oc=5": "https://is.gd/BfcnyU",
     "https://news.google.com/rss/articles/CBMiZEFVX3lxTE5nZjBEcG0xSkpXVVVyeXlSUDFweFNNVnlsbzlEd19GYks2a3lfbzZ6SFlTMjdOTWxWTjM1LXBTS0hBZUVscUwwRVFQYmM3ekRnVl9sOFUtZWs5ODBzMlZEMTBDR1c?oc=5": "https://is.gd/AHBcbL",
